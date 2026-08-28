@@ -45,6 +45,17 @@ omarchy-lights log
 journalctl --user -u omarchy-lights -f
 ```
 
+## Two (or more) colors per theme
+
+A theme can ship a `lights.rgb` next to its `colors.toml`, one hex per line (same convention as Omarchy's `keyboard.rgb`; a leading `#` is tolerated):
+
+```
+3a8bcc
+4b8537
+```
+
+The palette then flows through all of them (shades of A → blend → shades of B → blend → back). Without the file the theme's `accent` is used. Try colors by hand with `omarchy-lights sync 3a8bcc 4b8537`.
+
 ## Config
 
 `~/.config/omarchy-lights/config.json`

@@ -22,20 +22,50 @@ current_accent() {
   omarchy-theme-color accent 2>/dev/null
 }
 
+theme_colors() {
+  local file="$HOME/.local/state/omarchy/current/theme/lights.rgb" line
+  if [[ -f $file ]]; then
+    while read -r line; do
+      line=${line%%#*}; [[ -n $line ]] || continue
+      line=${line//[[:space:]]/}
+      [[ $line =~ ^[0-9a-fA-F]{6}$ ]] && echo "$line"
+    done < <(sed 's/^\s*#//' "$file")
+  fi
+}
+
+normalize_colors() {
+  local c out=()
+  for c in "$@"; do
+    c=${c#\#}; c=${c,,}
+    [[ $c =~ ^[0-9a-f]{6}$ ]] || { echo "invalid color: $c" >&2; return 1; }
+    out+=("$c")
+  done
+  echo "${out[*]}"
+}
+
 cmd_sync() {
-  local accent="${1:-$(current_accent)}"
-  [[ -n $accent ]] || { echo "could not resolve accent color"; exit 1; }
-  accent=${accent,,}
-  local now last_accent last_time
+  local colors
+  if (( $# > 0 )); then
+    colors=$(normalize_colors "$@") || exit 1
+  else
+    mapfile -t theme < <(theme_colors)
+    if (( ${#theme[@]} > 0 )); then
+      colors=$(normalize_colors "${theme[@]}")
+    else
+      colors=$(normalize_colors "$(current_accent)") || { echo "could not resolve accent color"; exit 1; }
+    fi
+  fi
+  local now last_colors last_time
   now=$(date +%s)
-  read -r last_accent last_time <"$STATE_DIR/last-sync" 2>/dev/null || true
-  if [[ ${last_accent:-} == "$accent" && $((now - ${last_time:-0})) -lt 15 ]]; then
-    echo "$(date +%T) sync $accent skipped (already applied ${last_time:+$((now - last_time))s ago})" >>"$LOG"
+  { read -r last_colors; read -r last_time; } 2>/dev/null <"$STATE_DIR/last-sync" || true
+  if [[ ${last_colors:-} == "$colors" && $((now - ${last_time:-0})) -lt 15 ]]; then
+    echo "$(date +%T) sync [$colors] skipped (already applied $((now - last_time))s ago)" >>"$LOG"
     return 0
   fi
-  echo "$accent $now" >"$STATE_DIR/last-sync"
-  python3 "$ROOT/lib/palette.py" "$accent" >"$PALETTE.tmp" && mv "$PALETTE.tmp" "$PALETTE"
-  echo "$(date +%T) sync $accent $(python3 -c "import json,sys;print(' '.join(json.load(open(sys.argv[1]))['shades']))" "$PALETTE")" >>"$LOG"
+  printf '%s\n%s\n' "$colors" "$now" >"$STATE_DIR/last-sync"
+  # shellcheck disable=SC2086
+  python3 "$ROOT/lib/palette.py" $colors >"$PALETTE.tmp" && mv "$PALETTE.tmp" "$PALETTE"
+  echo "$(date +%T) sync [$colors] $(python3 -c "import json,sys;print(' '.join(json.load(open(sys.argv[1]))['shades']))" "$PALETTE")" >>"$LOG"
 
   if [[ $(enabled desk) == true ]]; then
     (python3 "$ROOT/backends/desk.py" apply >>"$LOG" 2>&1 &)
@@ -66,12 +96,12 @@ case "${1:-}" in
   desk) shift; python3 "$ROOT/backends/desk.py" "${1:-apply}" ;;
   fans) shift; python3 "$ROOT/backends/fans.py" "${1:-info}" ;;
   govee) shift; python3 "$ROOT/backends/govee.py" "$@" ;;
-  palette) shift; python3 "$ROOT/lib/palette.py" "${1:-$(current_accent)}" ;;
+  palette) shift; if (( $# > 0 )); then python3 "$ROOT/lib/palette.py" "$@"; else mapfile -t t < <(theme_colors); python3 "$ROOT/lib/palette.py" "${t[@]:-$(current_accent)}"; fi ;;
   log) tail -n "${2:-30}" "$LOG" ;;
   *)
     cat <<USAGE
 usage: omarchy-lights <command>
-  sync [#hex]        apply current theme accent (or any color) to everything
+  sync [hex ...]     apply the theme's lights.rgb colors (or accent, or the given colors)
   status             what is installed / paired / running
   restart            restart the animation daemon (after editing config.json)
   pair-desk          pair with the Secretlab MAGRGB (Nanoleaf API)
@@ -79,7 +109,7 @@ usage: omarchy-lights <command>
   fans [info|run]    fans backend (openrgb direct mode)
   govee scan|set <#hex>|release
   daemon             run the fans + govee animation loop in the foreground
-  palette [#hex]     print the generated palette
+  palette [hex ...]  print the generated palette
   log [n]            tail the log
 USAGE
     ;;
