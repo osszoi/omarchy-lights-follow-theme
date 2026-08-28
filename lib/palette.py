@@ -25,32 +25,37 @@ def mix(a, b, t=0.5):
     return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
 
 
+def mirror(path):
+    return path + path[-2:0:-1]
+
+
 def single(rgb):
     h, l, s = colorsys.rgb_to_hls(*rgb)
     if s < 0.12:
-        return [shade(h, l, s, dl=-0.25), rgb, shade(h, l, s, dl=0.2), rgb]
+        return [shade(h, l, s, dl=-0.25), rgb, shade(h, l, s, dl=0.2)]
     return [
         shade(h, l, s, dl=-0.22, ds=0.05),
+        shade(h, l, s, dh=-0.06, dl=-0.08),
         rgb,
-        shade(h, l, s, dh=0.06, dl=0.02),
+        shade(h, l, s, dh=0.06, dl=0.06),
         shade(h, l, s, dl=0.18, ds=-0.05),
-        rgb,
-        shade(h, l, s, dh=-0.06, dl=-0.05),
     ]
 
 
 def multi(rgbs):
-    shades = []
-    for i, rgb in enumerate(rgbs):
+    families = []
+    for rgb in rgbs:
         h, l, s = colorsys.rgb_to_hls(*rgb)
-        nxt = rgbs[(i + 1) % len(rgbs)]
-        shades += [shade(h, l, s, dl=-0.2, ds=0.05), rgb, shade(h, l, s, dl=0.15, ds=-0.05), mix(rgb, nxt)]
-    return shades
+        families.append([shade(h, l, s, dl=-0.2, ds=0.05), rgb, shade(h, l, s, dl=0.15, ds=-0.05)])
+    path = []
+    for i, fam in enumerate(families):
+        path += fam if i % 2 == 0 else fam[::-1]
+    return path
 
 
 def build(colors):
     rgbs = [hex_to_rgb(c) for c in colors]
-    shades = single(rgbs[0]) if len(rgbs) == 1 else multi(rgbs)
+    shades = mirror(single(rgbs[0]) if len(rgbs) == 1 else multi(rgbs))
     hsb = []
     for c in shades:
         hh, ss, vv = colorsys.rgb_to_hsv(*c)

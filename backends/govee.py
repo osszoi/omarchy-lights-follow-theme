@@ -78,9 +78,10 @@ class Device:
     def razer(self, pt):
         self.send({"msg": {"cmd": "razer", "data": {"pt": pt}}})
 
-    def enable(self):
-        if self.brightness is not None:
+    def enable(self, with_brightness=False):
+        if with_brightness and self.brightness is not None:
             self.send({"msg": {"cmd": "brightness", "data": {"value": int(self.brightness)}}})
+            time.sleep(0.1)
         self.razer(RAZER_ON)
         self.last_enable = time.time()
 
@@ -138,7 +139,7 @@ def daemon(stop=None):
                 devices = fresh
                 log("devices:", {k: (v.ip, v.sku, v.segments, v.brightness) for k, v in devices.items()})
                 for d in devices.values():
-                    d.enable()
+                    d.enable(with_brightness=True)
             next_scan = now + (60 if devices else 15)
         try:
             mtime = PALETTE_FILE.stat().st_mtime
@@ -149,15 +150,13 @@ def daemon(stop=None):
             palette = load_palette()
             if palette:
                 log("palette:", palette["accent"], palette["shades"])
-                for d in devices.values():
-                    d.enable()
         if not palette or not devices:
             time.sleep(1)
             continue
         shades = [hex_to_rgb255(s) for s in palette["shades"]]
         phase = (now / period) % 1.0
         for d in devices.values():
-            if now - d.last_enable > 20:
+            if now - d.last_enable > 600:
                 d.enable()
             d.frame(gradient(shades, d.segments, phase))
         time.sleep(1 / fps)
