@@ -1,0 +1,5 @@
+#!/bin/bash
+LIGHTS="__LIGHTS_BIN__"
+[[ -x $LIGHTS ]] || exit 0
+"$LIGHTS" sync >/dev/null 2>&1 &
+disown

@@ -1,0 +1,11 @@
+[Unit]
+Description=Omarchy lights - fans + Govee accent animation
+After=network-online.target
+
+[Service]
+ExecStart=__LIGHTS_BIN__ daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

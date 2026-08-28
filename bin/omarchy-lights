@@ -1,0 +1,86 @@
+#!/bin/bash
+set -u
+
+ROOT=$(dirname "$(dirname "$(readlink -f "$0")")")
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-lights"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-lights"
+PALETTE="$STATE_DIR/palette.json"
+LOG="$STATE_DIR/lights.log"
+SERVICE=omarchy-lights.service
+
+mkdir -p "$STATE_DIR" "$CONFIG_DIR"
+
+enabled() {
+  python3 -c "import json,sys;print(str(json.load(open(sys.argv[1])).get(sys.argv[2],{}).get('enabled',True)).lower())" "$CONFIG_DIR/config.json" "$1" 2>/dev/null || echo true
+}
+
+daemon_running() {
+  systemctl --user is-active --quiet "$SERVICE"
+}
+
+current_accent() {
+  omarchy-theme-color accent 2>/dev/null
+}
+
+cmd_sync() {
+  local accent="${1:-$(current_accent)}"
+  [[ -n $accent ]] || { echo "could not resolve accent color"; exit 1; }
+  accent=${accent,,}
+  local now last_accent last_time
+  now=$(date +%s)
+  read -r last_accent last_time <"$STATE_DIR/last-sync" 2>/dev/null || true
+  if [[ ${last_accent:-} == "$accent" && $((now - ${last_time:-0})) -lt 15 ]]; then
+    echo "$(date +%T) sync $accent skipped (already applied ${last_time:+$((now - last_time))s ago})" >>"$LOG"
+    return 0
+  fi
+  echo "$accent $now" >"$STATE_DIR/last-sync"
+  python3 "$ROOT/lib/palette.py" "$accent" >"$PALETTE.tmp" && mv "$PALETTE.tmp" "$PALETTE"
+  echo "$(date +%T) sync $accent $(python3 -c "import json,sys;print(' '.join(json.load(open(sys.argv[1]))['shades']))" "$PALETTE")" >>"$LOG"
+
+  if [[ $(enabled desk) == true ]]; then
+    (python3 "$ROOT/backends/desk.py" apply >>"$LOG" 2>&1 &)
+  fi
+  if ! daemon_running; then
+    [[ $(enabled fans) == true ]] && ("$ROOT/backends/fans.sh" >>"$LOG" 2>&1 &)
+    [[ $(enabled govee) == true ]] && (python3 "$ROOT/backends/govee.py" set "$accent" >>"$LOG" 2>&1 &)
+  fi
+}
+
+cmd_status() {
+  echo "theme:   $(cat "$HOME/.local/state/omarchy/current/theme.name" 2>/dev/null) (accent $(current_accent))"
+  echo "palette: $([[ -f $PALETTE ]] && python3 -c "import json,sys;print(' '.join(json.load(open(sys.argv[1]))['shades']))" "$PALETTE" || echo none)"
+  echo "hook:    $([[ -f $HOME/.config/omarchy/hooks/theme-set.d/omarchy-lights ]] && echo installed || echo missing)"
+  echo "daemon:  $(systemctl --user is-active "$SERVICE" 2>/dev/null) (fans + govee animation)"
+  echo "openrgb: $(command -v openrgb >/dev/null && echo installed || echo missing)"
+  echo "desk:    $(python3 -c "import json,sys;c=json.load(open(sys.argv[1]))['desk'];print(c['host'] or 'unknown host', 'paired' if c['token'] else 'NOT paired')" "$CONFIG_DIR/config.json" 2>/dev/null || echo unconfigured)"
+  echo "govee:   $(python3 "$ROOT/backends/govee.py" scan 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);print(', '.join(f\"{v['sku']}@{v['ip']}\" for v in d.values()) or 'none found on LAN')")"
+  echo "log:     $LOG  (daemon: journalctl --user -u $SERVICE)"
+}
+
+case "${1:-}" in
+  sync) shift; cmd_sync "$@" ;;
+  status) cmd_status ;;
+  daemon) exec python3 "$ROOT/backends/daemon.py" ;;
+  restart) systemctl --user restart "$SERVICE" && echo restarted ;;
+  pair-desk) python3 "$ROOT/backends/desk.py" pair ;;
+  desk) shift; python3 "$ROOT/backends/desk.py" "${1:-apply}" ;;
+  fans) shift; python3 "$ROOT/backends/fans.py" "${1:-info}" ;;
+  govee) shift; python3 "$ROOT/backends/govee.py" "$@" ;;
+  palette) shift; python3 "$ROOT/lib/palette.py" "${1:-$(current_accent)}" ;;
+  log) tail -n "${2:-30}" "$LOG" ;;
+  *)
+    cat <<USAGE
+usage: omarchy-lights <command>
+  sync [#hex]        apply current theme accent (or any color) to everything
+  status             what is installed / paired / running
+  restart            restart the animation daemon (after editing config.json)
+  pair-desk          pair with the Secretlab MAGRGB (Nanoleaf API)
+  desk [apply|info]  desk backend
+  fans [info|run]    fans backend (openrgb direct mode)
+  govee scan|set <#hex>|release
+  daemon             run the fans + govee animation loop in the foreground
+  palette [#hex]     print the generated palette
+  log [n]            tail the log
+USAGE
+    ;;
+esac
