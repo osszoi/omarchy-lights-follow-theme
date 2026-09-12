@@ -18,6 +18,7 @@ DEFAULT_CONFIG = {
         "period_seconds": 12,
         "zone_leds": {"0": 48, "1": 48, "2": 48, "3": 48},
         "sdk_port": 6763,
+        "min_controllers": 1,
         "device_match": "COOLERMASTER ARGB",
     },
     "desk": {"enabled": True, "host": "", "port": 16021, "token": "", "effect": "flow"},

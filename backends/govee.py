@@ -5,6 +5,7 @@ import math
 import os
 import socket
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
@@ -71,6 +72,8 @@ class Device:
         self.brightness = brightness
         self.tx = tx
         self.last_enable = 0.0
+        self.missed_scans = 0
+        self.frames = 0
 
     def send(self, obj):
         self.tx.sendto(json.dumps(obj).encode(), (self.ip, CTRL_PORT))
@@ -86,6 +89,7 @@ class Device:
         self.last_enable = time.time()
 
     def frame(self, colors):
+        self.frames += 1
         packet = RAZER_HEADER + [len(colors)]
         for c in colors:
             packet.extend(c)
@@ -106,19 +110,42 @@ def gradient(shades, segments, phase):
     return [sample(shades, phase + i / segments) for i in range(segments)]
 
 
-def discover(cfg, tx):
-    seg_cfg = cfg["govee"]["segments"]
-    bri_cfg = cfg["govee"].get("brightness", {})
-    dev_cfg = cfg["govee"]["devices"]
-    devices = {}
-    for dev_id, info in scan().items():
-        own = dev_cfg.get(dev_id, {})
-        if own.get("enabled") is False:
+def device_settings(cfg, dev_id, sku):
+    own = cfg["govee"]["devices"].get(dev_id, {})
+    segments = own.get("segments") or cfg["govee"]["segments"].get(sku, 1)
+    brightness = own.get("brightness", cfg["govee"].get("brightness", {}).get(sku))
+    return own.get("enabled", True), int(segments), brightness
+
+
+def discover(cfg, tx, known):
+    found = scan()
+    changed = False
+    for dev_id, info in found.items():
+        enabled, segments, brightness = device_settings(cfg, dev_id, info["sku"])
+        if not enabled:
             continue
-        segments = own.get("segments") or seg_cfg.get(info["sku"], 1)
-        brightness = own.get("brightness", bri_cfg.get(info["sku"]))
-        devices[dev_id] = Device(dev_id, info["ip"], info["sku"], int(segments), brightness, tx)
-    return devices
+        d = known.get(dev_id)
+        if d is None:
+            d = Device(dev_id, info["ip"], info["sku"], segments, brightness, tx)
+            known[dev_id] = d
+            d.enable(with_brightness=True)
+            changed = True
+            continue
+        if d.ip != info["ip"]:
+            log(d.sku, "moved", d.ip, "->", info["ip"])
+            d.ip = info["ip"]
+            d.enable(with_brightness=True)
+            changed = True
+        if d.missed_scans >= 2:
+            log(d.sku, "answering scans again after", d.missed_scans * 20, "s, re-enabling razer")
+            d.enable(with_brightness=True)
+        d.missed_scans = 0
+    for dev_id, d in known.items():
+        if dev_id not in found:
+            d.missed_scans += 1
+            if d.missed_scans == 2:
+                log(d.sku, "missing from scan (wifi drop?)")
+    return changed
 
 
 def daemon(stop=None):
@@ -127,20 +154,28 @@ def daemon(stop=None):
     period = max(2.0, float(cfg["govee"]["period_seconds"]))
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     devices = {}
+    log("govee daemon starting")
+
+    def discovery_loop():
+        while stop is None or not stop.is_set():
+            try:
+                if discover(cfg, tx, devices):
+                    log("devices:", {k: (v.ip, v.sku, v.segments, v.brightness) for k, v in devices.items()})
+            except OSError as e:
+                log("discovery error:", e)
+            delay = 20 if devices else 15
+            if stop is None:
+                time.sleep(delay)
+            elif stop.wait(delay):
+                return
+
+    threading.Thread(target=discovery_loop, daemon=True).start()
+
     palette = None
     palette_mtime = 0.0
-    next_scan = 0.0
-    log("govee daemon starting")
+    last_summary = time.time()
     while stop is None or not stop.is_set():
         now = time.time()
-        if now >= next_scan:
-            fresh = discover(cfg, tx)
-            if set(fresh) != set(devices) or any(fresh[k].ip != devices[k].ip for k in fresh):
-                devices = fresh
-                log("devices:", {k: (v.ip, v.sku, v.segments, v.brightness) for k, v in devices.items()})
-                for d in devices.values():
-                    d.enable(with_brightness=True)
-            next_scan = now + (60 if devices else 15)
         try:
             mtime = PALETTE_FILE.stat().st_mtime
         except FileNotFoundError:
@@ -150,13 +185,18 @@ def daemon(stop=None):
             palette = load_palette()
             if palette:
                 log("palette:", palette["accent"], palette["shades"])
+        if now - last_summary > 300 and devices:
+            last_summary = now
+            for d in devices.values():
+                log("summary", d.sku, "frames/5min=%d missed_scans=%d" % (d.frames, d.missed_scans))
+                d.frames = 0
         if not palette or not devices:
             time.sleep(1)
             continue
         shades = [hex_to_rgb255(s) for s in palette["shades"]]
         phase = (now / period) % 1.0
         for d in devices.values():
-            if now - d.last_enable > 600:
+            if now - d.last_enable > 20:
                 d.enable()
             d.frame(gradient(shades, d.segments, phase))
         time.sleep(1 / fps)
@@ -164,7 +204,8 @@ def daemon(stop=None):
 
 def oneshot(hex_color):
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    devices = discover(load_config(), tx)
+    devices = {}
+    discover(load_config(), tx, devices)
     rgb = hex_to_rgb255(hex_color)
     for d in devices.values():
         d.razer(RAZER_OFF)
@@ -178,7 +219,9 @@ def oneshot(hex_color):
 
 def release():
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    for d in discover(load_config(), tx).values():
+    devices = {}
+    discover(load_config(), tx, devices)
+    for d in devices.values():
         d.razer(RAZER_OFF)
         log("released", d.id)
 

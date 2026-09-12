@@ -7,6 +7,7 @@ MAGIC = b"ORGB"
 REQUEST_CONTROLLER_COUNT = 0
 REQUEST_CONTROLLER_DATA = 1
 REQUEST_PROTOCOL_VERSION = 40
+REQUEST_RESCAN_DEVICES = 140
 SET_CLIENT_NAME = 50
 DEVICE_LIST_UPDATED = 100
 RESIZEZONE = 1000
@@ -129,6 +130,9 @@ class OpenRGBClient:
             dev, pid, data = self.recv()
             if pid == pkt_id:
                 return data
+
+    def rescan(self):
+        self.send(0, REQUEST_RESCAN_DEVICES)
 
     def controller_count(self):
         self.send(0, REQUEST_CONTROLLER_COUNT)

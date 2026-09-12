@@ -113,12 +113,16 @@ def connect(cfg):
     ensure_openrgb_config()
     proc = start_server(port)
     match = fans.get("device_match", "COOLERMASTER ARGB")
+    min_controllers = int(fans.get("min_controllers", 1))
     zone_leds = {str(k): v for k, v in fans.get("zone_leds", {"0": 48, "1": 48, "2": 48, "3": 48}).items()}
     controllers = []
     client = None
     for attempt in range(10):
         try:
             client = OpenRGBClient(port=port)
+            if attempt > 1:
+                client.rescan()
+                time.sleep(2)
             for i in range(client.controller_count()):
                 info = client.controller(i)
                 if match.lower() in info["name"].lower():
@@ -126,11 +130,12 @@ def connect(cfg):
         except (OSError, ConnectionError, ValueError) as e:
             log("connect attempt", attempt + 1, "failed:", e)
             controllers = []
-        if controllers:
+        if len(controllers) >= min_controllers:
             break
+        log("found", len(controllers), "controllers, want", min_controllers, "- retrying")
         if client:
             client.close()
-        time.sleep(1)
+        time.sleep(2)
         if proc is None:
             proc = start_server(port)
         client = None
