@@ -20,6 +20,13 @@ done
 systemctl --user daemon-reload
 pkill -f "openrgb --config $CONFIG_DIR/openrgb" 2>/dev/null || true
 
+step "removing the bar widget"
+PLUGIN_ID=eduardo.hardware-lights
+if command -v omarchy-shell >/dev/null; then
+  omarchy plugin disable "$PLUGIN_ID" 2>/dev/null || true
+fi
+rm -f "$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+
 step "removing hook and launcher"
 rm -f "$HOOK" "$BIN"
 

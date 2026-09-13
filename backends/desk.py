@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
-from common import load_config, load_palette, save_config  # noqa: E402
+from common import load_config, load_palette, record_result, save_config  # noqa: E402
 
 PLUGINS = {
     "flow": "027842e4-e1d6-4a4c-a731-be74a1ebd4cf",
@@ -98,6 +98,7 @@ def apply():
     cfg = load_config()
     if not cfg["desk"]["token"]:
         log("desk not paired, run: omarchy-lights pair-desk")
+        record_result("desk", {"ok": False, "present": False, "detail": "not paired", "at": time.time()})
         return 1
     palette = load_palette()
     if not palette:
@@ -110,6 +111,9 @@ def apply():
     except Exception:
         if not rediscover(cfg):
             log("desk unreachable at", cfg["desk"]["host"])
+            record_result("desk", {"ok": False, "present": False,
+                                   "detail": "unreachable at " + (cfg["desk"]["host"] or "unknown host"),
+                                   "at": time.time()})
             return 1
     effect = cfg["desk"].get("effect", "flow")
     if effect == "static":
@@ -135,6 +139,8 @@ def apply():
     try:
         status, _ = request(cfg, "PUT", "/effects", body, timeout=6)
         log("desk effect", effect, "applied", palette["accent"])
+        record_result("desk", {"ok": True, "present": True,
+                               "detail": "%s · %s" % (cfg["desk"]["host"], effect), "at": time.time()})
         return 0
     except urllib.error.HTTPError as e:
         log("effect write failed", e.code, e.read()[:200], "- falling back to static")
@@ -146,6 +152,8 @@ def static(cfg, palette):
     body = {"on": {"value": True}, "hue": {"value": hsb["hue"]}, "sat": {"value": hsb["saturation"]}}
     request(cfg, "PUT", "/state", body)
     log("desk static", palette["accent"])
+    record_result("desk", {"ok": True, "present": True,
+                           "detail": "%s · static" % cfg["desk"]["host"], "at": time.time()})
     return 0
 
 

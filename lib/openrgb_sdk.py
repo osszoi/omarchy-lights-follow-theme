@@ -48,11 +48,14 @@ class Reader:
         self.pos += n
 
 
+MODE_FLAG_MODE_SPECIFIC_COLOR = 1 << 6
+
+
 def parse_mode(r):
     start = r.pos
     name = r.string()
     value = r.i32()
-    r.u32()  # flags
+    flags = r.u32()
     r.u32(); r.u32()  # speed min/max
     r.u32(); r.u32()  # brightness min/max
     r.u32(); r.u32()  # colors min/max
@@ -60,9 +63,17 @@ def parse_mode(r):
     r.u32()  # brightness
     r.u32()  # direction
     color_mode = r.u32()
+    colors_at = r.pos - start
     n = r.u16()
     r.skip(4 * n)
-    return {"name": name, "value": value, "color_mode": color_mode, "raw": bytes(r.buf[start:r.pos])}
+    return {"name": name, "value": value, "flags": flags, "color_mode": color_mode,
+            "colors_at": colors_at, "raw": bytes(r.buf[start:r.pos])}
+
+
+def mode_with_color(mode, rgb):
+    """Same mode packet, carrying a single mode-specific color."""
+    r, g, b = rgb
+    return mode["raw"][:mode["colors_at"]] + struct.pack("<HI", 1, r | (g << 8) | (b << 16))
 
 
 def parse_zone(r):

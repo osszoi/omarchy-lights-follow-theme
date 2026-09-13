@@ -14,7 +14,15 @@ from common import CONFIG_DIR, PALETTE_FILE, hex_to_rgb255, load_config, load_pa
 from openrgb_sdk import OpenRGBClient  # noqa: E402
 
 OPENRGB_CONFIG = CONFIG_DIR / "openrgb"
-KEEP_DETECTORS = {"Cooler Master ARGB"}
+
+
+def keep_detectors():
+    cfg = load_config()
+    wanted = {cfg["fans"].get("detector", "Cooler Master ARGB"), cfg["keyboard"].get("detector", "")}
+    return {d for d in wanted if d}
+
+
+STATUS = {"present": False, "detail": "not started"}
 
 
 def log(*a):
@@ -33,14 +41,16 @@ def ensure_openrgb_config():
         global_cfg = os.path.expanduser("~/.config/OpenRGB/OpenRGB.json")
         if os.path.exists(global_cfg):
             detectors.update(json.load(open(global_cfg)).get("Detectors", {}).get("detectors", {}))
+    keep = keep_detectors()
     changed = False
     for k in list(detectors):
-        want = k in KEEP_DETECTORS
+        want = k in keep
         if detectors[k] != want:
             detectors[k] = want
             changed = True
     if changed or not cfg_file.exists():
         cfg_file.write_text(json.dumps(data, indent=1))
+    return changed
 
 
 def port_open(port):
@@ -142,6 +152,10 @@ def connect(cfg):
     if client is None:
         client = OpenRGBClient(port=port)
     log("server protocol", client.server_protocol, "controllers:", [(c.name, c.zones) for c in controllers])
+    leds = sum(c.num_leds for c in controllers)
+    STATUS["present"] = len(controllers) > 0
+    STATUS["detail"] = "%d controller%s · %d LEDs" % (len(controllers), "" if len(controllers) == 1 else "s", leds) \
+        if controllers else "no ARGB controller found"
     return proc, client, controllers
 
 
@@ -165,6 +179,7 @@ def run(stop=None):
                 proc, client, controllers = connect(cfg)
                 if not controllers:
                     log("no matching controllers, retrying in 30s")
+                    STATUS["detail"] = "no ARGB controller found"
                     client.close(); client = None
                     time.sleep(30)
                     continue
@@ -191,6 +206,8 @@ def run(stop=None):
             time.sleep(1 / fps)
         except Exception as e:
             log("error:", e, "- reconnecting in 5s")
+            STATUS["present"] = False
+            STATUS["detail"] = "reconnecting"
             if client:
                 client.close()
             client = None
@@ -202,6 +219,8 @@ def run(stop=None):
         client.close()
     if proc and proc.poll() is None:
         proc.terminate()
+    STATUS["present"] = False
+    STATUS["detail"] = "stopped"
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy-lights"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PALETTE_FILE = STATE_DIR / "palette.json"
+STATUS_FILE = STATE_DIR / "status.json"
+RESULTS_FILE = STATE_DIR / "results.json"
 
 DEFAULT_CONFIG = {
     "fans": {
@@ -22,6 +24,13 @@ DEFAULT_CONFIG = {
         "device_match": "COOLERMASTER ARGB",
     },
     "desk": {"enabled": True, "host": "", "port": 16021, "token": "", "effect": "flow"},
+    "keyboard": {
+        "enabled": True,
+        "detector": "Keychron Q6 Max",
+        "device_match": "Keychron",
+        "usb_id": "3434:0860",
+        "effect": "Solid Reactive Multinexus",
+    },
     "govee": {
         "enabled": True,
         "fps": 4,
@@ -50,6 +59,33 @@ def load_config():
 def save_config(cfg):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2) + "\n")
+
+
+def set_enabled(section, key, value):
+    cfg = load_config()
+    if key is None:
+        cfg.setdefault(section, {})["enabled"] = value
+    else:
+        cfg.setdefault(section, {}).setdefault("devices", {}).setdefault(key, {})["enabled"] = value
+    save_config(cfg)
+    return cfg
+
+
+def read_results():
+    try:
+        return json.loads(RESULTS_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def record_result(key, data):
+    """Last outcome of a one-shot backend, so the bar widget can show it."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    results = read_results()
+    results[key] = data
+    tmp = RESULTS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(results))
+    tmp.replace(RESULTS_FILE)
 
 
 def load_palette():

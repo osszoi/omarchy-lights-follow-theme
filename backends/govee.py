@@ -17,6 +17,13 @@ CTRL_PORT = 4003
 RAZER_HEADER = [0xBB, 0x00, 0xFA, 0xB0, 0x00]
 RAZER_ON = "uwABsQEK"
 RAZER_OFF = "uwABsQAL"
+SKU_NAMES = {"H6061": "Glide Hexa", "H6056": "Flow Plus"}
+
+STATUS = {}
+
+
+def sku_name(sku):
+    return SKU_NAMES.get(sku, sku or "Govee light")
 
 
 def log(*a):
@@ -122,7 +129,10 @@ def discover(cfg, tx, known):
     changed = False
     for dev_id, info in found.items():
         enabled, segments, brightness = device_settings(cfg, dev_id, info["sku"])
+        STATUS[dev_id] = {"sku": info["sku"], "name": sku_name(info["sku"]), "ip": info["ip"],
+                          "segments": segments, "present": True}
         if not enabled:
+            known.pop(dev_id, None)
             continue
         d = known.get(dev_id)
         if d is None:
@@ -145,6 +155,9 @@ def discover(cfg, tx, known):
             d.missed_scans += 1
             if d.missed_scans == 2:
                 log(d.sku, "missing from scan (wifi drop?)")
+    for dev_id, entry in STATUS.items():
+        if dev_id not in found:
+            entry["present"] = False
     return changed
 
 
@@ -159,7 +172,8 @@ def daemon(stop=None):
     def discovery_loop():
         while stop is None or not stop.is_set():
             try:
-                if discover(cfg, tx, devices):
+                # reload so per-device toggles from the bar widget land on the next round
+                if discover(load_config(), tx, devices):
                     log("devices:", {k: (v.ip, v.sku, v.segments, v.brightness) for k, v in devices.items()})
             except OSError as e:
                 log("discovery error:", e)

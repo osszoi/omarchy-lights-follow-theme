@@ -53,6 +53,18 @@ mkdir -p "$HOOK_DIR"
 sed "s|__LIGHTS_BIN__|$LIGHTS_BIN|" "$ROOT/hooks/omarchy-lights" >"$HOOK_DIR/omarchy-lights"
 chmod +x "$HOOK_DIR/omarchy-lights"
 
+step "installing the bar widget"
+if command -v omarchy-shell >/dev/null; then
+  PLUGIN_ID=$(python3 -c "import json;print(json.load(open('$ROOT/shell-plugin/manifest.json'))['id'])")
+  mkdir -p "$HOME/.config/omarchy/plugins"
+  ln -sfn "$ROOT/shell-plugin" "$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+  omarchy-shell shell rescanPlugins >/dev/null
+  sleep 0.5
+  omarchy plugin enable "$PLUGIN_ID" --section right || echo "enable it by hand: omarchy plugin enable $PLUGIN_ID"
+else
+  echo "omarchy-shell not found, skipping the bar widget"
+fi
+
 step "installing animation service"
 mkdir -p "$UNIT_DIR"
 systemctl --user disable --now omarchy-lights-govee.service 2>/dev/null || true

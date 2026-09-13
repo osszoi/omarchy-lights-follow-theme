@@ -70,10 +70,29 @@ cmd_sync() {
   if [[ $(enabled desk) == true ]]; then
     (python3 "$ROOT/backends/desk.py" apply >>"$LOG" 2>&1 &)
   fi
+  if [[ $(enabled keyboard) == true ]]; then
+    (python3 "$ROOT/backends/keyboard.py" apply >>"$LOG" 2>&1 &)
+  fi
   if ! daemon_running; then
     [[ $(enabled fans) == true ]] && ("$ROOT/backends/fans.sh" >>"$LOG" 2>&1 &)
-    [[ $(enabled govee) == true ]] && (python3 "$ROOT/backends/govee.py" set "$accent" >>"$LOG" 2>&1 &)
+    [[ $(enabled govee) == true ]] && (python3 "$ROOT/backends/govee.py" set "#${colors%% *}" >>"$LOG" 2>&1 &)
   fi
+}
+
+cmd_toggle() {
+  local id=${1:-} want=${2:-}
+  [[ -n $id ]] || { echo "usage: omarchy-lights toggle <id> [on|off]"; exit 1; }
+  python3 "$ROOT/lib/toggle.py" "$id" "$want"
+}
+
+cmd_hw() {
+  [[ -f $STATE_DIR/status.json ]] || { echo "no status yet (is the daemon running?)"; return 1; }
+  python3 -c "
+import json,sys
+s = json.load(open(sys.argv[1]))
+for d in s['devices']:
+    print('%-3s %-14s %-14s %s' % ('[x]' if d['enabled'] else '[ ]', d['id'], d['name'], d['detail'] or ''))
+" "$STATE_DIR/status.json"
 }
 
 cmd_status() {
@@ -89,12 +108,15 @@ cmd_status() {
 
 case "${1:-}" in
   sync) shift; cmd_sync "$@" ;;
+  toggle) shift; cmd_toggle "$@" ;;
+  hw) cmd_hw ;;
   status) cmd_status ;;
   daemon) exec python3 "$ROOT/backends/daemon.py" ;;
   restart) systemctl --user restart "$SERVICE" && echo restarted ;;
   pair-desk) python3 "$ROOT/backends/desk.py" pair ;;
   desk) shift; python3 "$ROOT/backends/desk.py" "${1:-apply}" ;;
   fans) shift; python3 "$ROOT/backends/fans.py" "${1:-info}" ;;
+  keyboard) shift; python3 "$ROOT/backends/keyboard.py" "${1:-apply}" ;;
   govee) shift; python3 "$ROOT/backends/govee.py" "$@" ;;
   palette) shift; if (( $# > 0 )); then python3 "$ROOT/lib/palette.py" "$@"; else mapfile -t t < <(theme_colors); python3 "$ROOT/lib/palette.py" "${t[@]:-$(current_accent)}"; fi ;;
   log) tail -n "${2:-30}" "$LOG" ;;
@@ -102,11 +124,16 @@ case "${1:-}" in
     cat <<USAGE
 usage: omarchy-lights <command>
   sync [hex ...]     apply the theme's lights.rgb colors (or accent, or the given colors)
+  hw                 list the hardware and what is syncing
+  toggle <id> [on|off]
+                     turn syncing on or off for one device (ids from 'hw')
   status             what is installed / paired / running
   restart            restart the animation daemon (after editing config.json)
   pair-desk          pair with the Secretlab MAGRGB (Nanoleaf API)
   desk [apply|info]  desk backend
   fans [info|run]    fans backend (openrgb direct mode)
+  keyboard [apply|info]
+                     keyboard backend (reactive effect in the theme accent)
   govee scan|set <#hex>|release
   daemon             run the fans + govee animation loop in the foreground
   palette [hex ...]  print the generated palette
