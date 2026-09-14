@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import glob
 import os
+import subprocess
 import sys
 import time
 
@@ -15,19 +16,49 @@ def log(*a):
     print(time.strftime("%H:%M:%S"), "[keyboard]", *a, flush=True)
 
 
-def connected(usb_id):
-    """The keyboard only speaks RGB over the cable, so look for its USB id."""
+def hidraw_nodes(usb_id):
+    """The keyboard only speaks RGB over the cable, so look for its USB id among the hidraw devices."""
     if not usb_id or ":" not in usb_id:
-        return True
+        return []
     vid, pid = usb_id.lower().split(":", 1)
-    for path in glob.glob("/sys/bus/usb/devices/*/idVendor"):
+    want = "HID_ID=0003:%08X:%08X" % (int(vid, 16), int(pid, 16))
+    nodes = []
+    for uevent in glob.glob("/sys/class/hidraw/hidraw*/device/uevent"):
         try:
-            if open(path).read().strip().lower() != vid:
-                continue
-            if open(os.path.join(os.path.dirname(path), "idProduct")).read().strip().lower() == pid:
-                return True
+            if want in open(uevent).read():
+                nodes.append("/dev/" + uevent.split("/")[4])
         except OSError:
             continue
+    return nodes
+
+
+def connected(usb_id):
+    if not usb_id or ":" not in usb_id:
+        return True
+    return bool(hidraw_nodes(usb_id))
+
+
+def enumerated_at(usb_id):
+    """When the keyboard last showed up on USB: the device nodes are created on enumeration."""
+    times = []
+    for node in hidraw_nodes(usb_id):
+        try:
+            times.append(os.stat(node).st_ctime)
+        except OSError:
+            continue
+    return max(times) if times else 0.0
+
+
+def daemon_running():
+    return subprocess.run(["systemctl", "--user", "is-active", "--quiet", "omarchy-lights.service"]).returncode == 0
+
+
+def wait_for_server(port, timeout=30):
+    end = time.time() + timeout
+    while time.time() < end:
+        if fans.port_open(port):
+            return True
+        time.sleep(0.5)
     return False
 
 
@@ -62,7 +93,15 @@ def apply():
     already_up = fans.port_open(port)
     if changed and already_up:
         log("openrgb detector list changed, the running server needs a restart to see the keyboard")
-    proc = fans.start_server(port)
+    proc = None
+    # the fans worker owns the server while the daemon runs: never race it with a second openrgb on the same port
+    if daemon_running() and cfg["fans"].get("enabled", True):
+        if not wait_for_server(port):
+            log("daemon is running but its openrgb server never came up on port", port)
+            record_result("keyboard", {"ok": False, "present": True, "detail": "openrgb server not up", "at": time.time()})
+            return 1
+    else:
+        proc = fans.start_server(port)
     client = None
     try:
         client = OpenRGBClient(port=port)
@@ -85,7 +124,11 @@ def apply():
         mode = info["modes"][mode_idx]
         raw = mode_with_color(mode, accent) if mode["flags"] & MODE_FLAG_MODE_SPECIFIC_COLOR else mode["raw"]
         client.update_mode(idx, mode_idx, raw)
-        log(info["name"], "->", effect, palette["accent"])
+        time.sleep(0.2)
+        # update_mode is RAM only on this firmware; a power cycle brings back whatever was saved last
+        client.save_mode(idx, mode_idx, raw)
+        time.sleep(0.2)
+        log(info["name"], "->", effect, palette["accent"], "(saved to keyboard)")
         record_result("keyboard", {"ok": True, "present": True, "name": info["name"],
                                    "detail": "%s · %s" % (effect, palette["accent"]), "at": time.time()})
         return 0

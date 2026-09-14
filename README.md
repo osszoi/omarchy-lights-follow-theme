@@ -25,7 +25,7 @@ Requirements you have to do once, by hand:
 - Govee Home app -> each light -> settings (gear) -> **LAN Control** on. Without it the lights never answer on the LAN.
 - If `ufw` is active the installer adds one rule (inbound udp 4002 from your LAN) so the lights' discovery replies get through.
 - The MAGRGB strip must be on the same Wi-Fi as this PC. To pair: Nanoleaf app -> MAGRGB -> device settings -> **Connect to API**, while `omarchy-lights pair-desk` is polling (30 s window). Never hold the controller's power button for that: 10 s is a factory reset.
-- The keyboard only speaks RGB over the **USB cable**. On the Keychron Link dongle or Bluetooth there is no OpenRGB detector and no udev rule, so it keeps whatever color it last got. The effect itself lives in the keyboard's own firmware, so it keeps working wirelessly — it just stops following theme changes until you plug the cable back in.
+- The keyboard only speaks RGB over the **USB cable**. On the Keychron Link dongle or Bluetooth there is no OpenRGB detector and no udev rule, so it keeps whatever color it last got. The effect is saved into the keyboard itself (same as Keychron Launcher does), so it survives reboots, unplugging and wireless — it just stops following theme changes until the cable is back. The daemon also re-applies it whenever the keyboard shows up on USB again.
 - OpenRGB runs with a private config (`~/.config/omarchy-lights/openrgb`) where only the Cooler Master and Keychron detectors are enabled: the stock detection segfaults on exit with this GPU/monitor/mic combo, and it keeps your own OpenRGB setup untouched.
 
 ## Bar widget

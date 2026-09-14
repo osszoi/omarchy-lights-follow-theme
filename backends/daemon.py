@@ -57,6 +57,37 @@ def run_oneshot(name):
     subprocess.Popen([sys.executable, str(script)] + ONESHOTS[name][1:])
 
 
+def boot_desk(stop):
+    # the strip keeps its effect across our restarts, this only covers a theme change it missed while off
+    if not stop.wait(15) and load_config()["desk"].get("enabled", True):
+        log("applying desk after start")
+        run_oneshot("desk")
+
+
+class KeyboardReapply:
+    """Re-tint the keyboard every time it shows up on USB: reboot, replug, wireless -> cable."""
+
+    def __init__(self):
+        self.handled = 0.0
+
+    def check(self, cfg):
+        kb = cfg["keyboard"]
+        if not kb.get("enabled", True):
+            return
+        seen = keyboard.enumerated_at(kb.get("usb_id", ""))
+        if not seen or seen <= self.handled:
+            return
+        if seen <= read_results().get("keyboard", {}).get("at", 0):
+            self.handled = seen
+            return
+        fans_on = cfg["fans"].get("enabled", True)
+        if fans_on and not fans.port_open(int(cfg["fans"].get("sdk_port", 6763))):
+            return
+        self.handled = seen
+        log("keyboard (re)connected at", time.strftime("%H:%M:%S", time.localtime(seen)), "- applying")
+        run_oneshot("keyboard")
+
+
 def theme_name():
     try:
         return THEME_NAME.read_text().strip()
@@ -136,6 +167,8 @@ def main():
     wanted_oneshots = None
     config_mtime = None
     cfg = load_config()
+    reapply = KeyboardReapply()
+    threading.Thread(target=boot_desk, args=(stop,), daemon=True).start()
 
     while not stop.is_set():
         try:
@@ -164,6 +197,7 @@ def main():
                         log("applying", name)
                         run_oneshot(name)
             wanted_oneshots = oneshots
+        reapply.check(cfg)
         write_status(cfg, running)
         stop.wait(2)
 

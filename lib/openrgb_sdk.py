@@ -14,6 +14,7 @@ RESIZEZONE = 1000
 UPDATELEDS = 1050
 SETCUSTOMMODE = 1100
 UPDATEMODE = 1101
+SAVEMODE = 1102
 
 
 class Reader:
@@ -162,6 +163,11 @@ class OpenRGBClient:
     def update_mode(self, idx, mode_idx, mode_raw):
         body = struct.pack("<i", mode_idx) + mode_raw
         self.send(idx, UPDATEMODE, struct.pack("<I", 4 + len(body)) + body)
+
+    def save_mode(self, idx, mode_idx, mode_raw):
+        """Persist the mode in the device itself (MANUAL_SAVE devices lose update_mode on power cycle)."""
+        body = struct.pack("<i", mode_idx) + mode_raw
+        self.send(idx, SAVEMODE, struct.pack("<I", 4 + len(body)) + body)
 
     def update_leds(self, idx, colors):
         body = struct.pack("<H", len(colors)) + b"".join(struct.pack("<I", (r) | (g << 8) | (b << 16)) for r, g, b in colors)
