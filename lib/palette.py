@@ -60,8 +60,11 @@ def build(colors):
     for c in shades:
         hh, ss, vv = colorsys.rgb_to_hsv(*c)
         hsb.append({"hue": round(hh * 360), "saturation": round(ss * 100), "brightness": round(vv * 100)})
+    # one flat color for hardware that can only store a single color as its resting state
+    static = rgbs[0] if len(rgbs) == 1 else tuple(sum(c[i] for c in rgbs) / len(rgbs) for i in range(3))
     return {
         "accent": rgb_to_hex(rgbs[0]),
+        "static": rgb_to_hex(static),
         "colors": [rgb_to_hex(c) for c in rgbs],
         "shades": [rgb_to_hex(c) for c in shades],
         "hsb": hsb,

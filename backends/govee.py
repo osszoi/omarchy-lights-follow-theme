@@ -20,6 +20,8 @@ RAZER_OFF = "uwABsQAL"
 SKU_NAMES = {"H6061": "Glide Hexa", "H6056": "Flow Plus"}
 
 STATUS = {}
+# what the light falls back to ~10s after the stream stops; only one flat color can be stored
+STATIC_RGB = None
 
 
 def sku_name(sku):
@@ -89,9 +91,30 @@ class Device:
         self.send({"msg": {"cmd": "razer", "data": {"pt": pt}}})
 
     def enable(self, with_brightness=False):
-        if with_brightness and self.brightness is not None:
-            self.send({"msg": {"cmd": "brightness", "data": {"value": int(self.brightness)}}})
-            time.sleep(0.1)
+        if with_brightness:
+            self.bake()
+            if self.brightness is not None:
+                self.send({"msg": {"cmd": "brightness", "data": {"value": int(self.brightness)}}})
+                time.sleep(0.2)
+        self.razer(RAZER_ON)
+        self.last_enable = time.time()
+
+    def bake(self):
+        # the light needs a moment to commit the color before razer takes over, 0.1s was not enough (came back red)
+        if not STATIC_RGB:
+            return
+        self.color(STATIC_RGB)
+        time.sleep(0.4)
+        self.color(STATIC_RGB)
+        time.sleep(0.8)
+
+    def rebake(self):
+        """Stored color only takes while not streaming, so drop out for a blink and come back."""
+        if not STATIC_RGB:
+            return
+        self.razer(RAZER_OFF)
+        time.sleep(0.3)
+        self.bake()
         self.razer(RAZER_ON)
         self.last_enable = time.time()
 
@@ -198,7 +221,11 @@ def daemon(stop=None):
             palette_mtime = mtime
             palette = load_palette()
             if palette:
-                log("palette:", palette["accent"], palette["shades"])
+                global STATIC_RGB
+                STATIC_RGB = hex_to_rgb255(palette.get("static", palette["accent"]))
+                log("palette:", palette["accent"], palette["shades"], "fallback", palette.get("static", palette["accent"]))
+                for d in list(devices.values()):
+                    d.rebake()
         if now - last_summary > 300 and devices:
             last_summary = now
             for d in devices.values():
@@ -220,7 +247,8 @@ def oneshot(hex_color):
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     devices = {}
     discover(load_config(), tx, devices)
-    rgb = hex_to_rgb255(hex_color)
+    palette = load_palette()
+    rgb = hex_to_rgb255(palette["static"] if palette and "static" in palette else hex_color)
     for d in devices.values():
         d.razer(RAZER_OFF)
         d.color(rgb)
