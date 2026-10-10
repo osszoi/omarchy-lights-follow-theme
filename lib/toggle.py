@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import load_config, save_config  # noqa: E402
 
-SECTIONS = ("fans", "desk", "govee", "keyboard")
+SECTIONS = ("fans", "desk", "govee", "keyboard", "mic")
 
 
 def main(target, want=""):

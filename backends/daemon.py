@@ -14,12 +14,13 @@ from common import CONFIG_FILE, STATE_DIR, STATUS_FILE, load_config, load_palett
 import fans  # noqa: E402
 import govee  # noqa: E402
 import keyboard  # noqa: E402
+import mic  # noqa: E402
 
 stop = threading.Event()
 THEME_NAME = Path.home() / ".local/state/omarchy/current/theme.name"
 LIGHTS_BIN = Path(__file__).resolve().parent.parent / "bin" / "omarchy-lights"
 
-WORKERS = {"fans": fans.run, "govee": govee.daemon}
+WORKERS = {"fans": fans.run, "govee": govee.daemon, "mic": mic.run}
 ONESHOTS = {"desk": ["desk.py", "apply"], "keyboard": ["keyboard.py", "apply"]}
 
 
@@ -80,8 +81,7 @@ class KeyboardReapply:
         if seen <= read_results().get("keyboard", {}).get("at", 0):
             self.handled = seen
             return
-        fans_on = cfg["fans"].get("enabled", True)
-        if fans_on and not fans.port_open(int(cfg["fans"].get("sdk_port", 6763))):
+        if fans.daemon_serves(cfg) and not fans.port_open(int(cfg["fans"].get("sdk_port", 6763))):
             return
         self.handled = seen
         log("keyboard (re)connected at", time.strftime("%H:%M:%S", time.localtime(seen)), "- applying")
@@ -113,6 +113,10 @@ def device_rows(cfg, running):
     rows.append({"id": "keyboard", "name": kb.get("name") or "Keyboard",
                  "enabled": cfg["keyboard"].get("enabled", True), "present": plugged,
                  "detail": kb.get("detail") if plugged else "USB cable disconnected"})
+
+    mic_on = cfg["mic"].get("enabled", True)
+    rows.append({"id": "mic", "name": mic.STATUS["name"] or "Microphone", "enabled": mic_on,
+                 "present": mic.STATUS["present"], "detail": mic.STATUS["detail"] if mic_on else "not syncing"})
 
     devices = cfg["govee"].get("devices", {})
     seen = dict(govee.STATUS)

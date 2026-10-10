@@ -1,5 +1,5 @@
 [Unit]
-Description=Omarchy lights - fans + Govee accent animation
+Description=Omarchy lights - fans, Govee and mic accent animation
 After=network-online.target
 
 [Service]

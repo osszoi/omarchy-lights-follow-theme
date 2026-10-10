@@ -31,6 +31,15 @@ DEFAULT_CONFIG = {
         "usb_id": "3434:0860",
         "effect": "Solid Reactive Multinexus",
     },
+    "mic": {
+        "enabled": True,
+        "detector": "HyperX Quadcast S",
+        "device_match": "Quadcast",
+        "usb_id": "03f0:028c",
+        "fps": 4,
+        "period_seconds": 12,
+        "min_brightness": 0.35,
+    },
     "govee": {
         "enabled": True,
         "fps": 4,

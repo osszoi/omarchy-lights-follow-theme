@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
@@ -18,7 +19,8 @@ OPENRGB_CONFIG = CONFIG_DIR / "openrgb"
 
 def keep_detectors():
     cfg = load_config()
-    wanted = {cfg["fans"].get("detector", "Cooler Master ARGB"), cfg["keyboard"].get("detector", "")}
+    wanted = {cfg["fans"].get("detector", "Cooler Master ARGB"), cfg["keyboard"].get("detector", ""),
+              cfg["mic"].get("detector", "")}
     return {d for d in wanted if d}
 
 
@@ -74,6 +76,57 @@ def start_server(port):
     raise RuntimeError("openrgb server did not open its port")
 
 
+class SharedServer:
+    """One openrgb server per process: whoever needs it first starts it, the last user out stops it."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.proc = None
+        self.users = 0
+        self.started_at = 0.0
+
+    def use(self):
+        with self.lock:
+            self.users += 1
+
+    def ensure(self, port):
+        with self.lock:
+            ensure_openrgb_config()
+            if self.proc is not None and self.proc.poll() is not None:
+                self.proc = None
+            if self.proc is None:
+                self.proc = start_server(port)
+                self.started_at = time.time() if self.proc else 0.0
+
+    def stop(self):
+        with self.lock:
+            self._stop()
+
+    def release(self):
+        with self.lock:
+            self.users -= 1
+            if self.users <= 0:
+                self._stop()
+
+    def _stop(self):
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+        self.proc = None
+
+
+SERVER = SharedServer()
+SERVER_USERS = ("fans", "mic")
+
+
+def daemon_serves(cfg):
+    """The daemon keeps an openrgb server up while any of these is syncing."""
+    return any(cfg[k].get("enabled", True) for k in SERVER_USERS)
+
+
 class Controller:
     def __init__(self, client, idx, info, zone_leds):
         self.client = client
@@ -120,8 +173,7 @@ class Controller:
 def connect(cfg):
     fans = cfg["fans"]
     port = int(fans.get("sdk_port", 6763))
-    ensure_openrgb_config()
-    proc = start_server(port)
+    SERVER.ensure(port)
     match = fans.get("device_match", "COOLERMASTER ARGB")
     min_controllers = int(fans.get("min_controllers", 1))
     zone_leds = {str(k): v for k, v in fans.get("zone_leds", {"0": 48, "1": 48, "2": 48, "3": 48}).items()}
@@ -146,8 +198,7 @@ def connect(cfg):
         if client:
             client.close()
         time.sleep(2)
-        if proc is None:
-            proc = start_server(port)
+        SERVER.ensure(port)
         client = None
     if client is None:
         client = OpenRGBClient(port=port)
@@ -156,7 +207,7 @@ def connect(cfg):
     STATUS["present"] = len(controllers) > 0
     STATUS["detail"] = "%d controller%s · %d LEDs" % (len(controllers), "" if len(controllers) == 1 else "s", leds) \
         if controllers else "no ARGB controller found"
-    return proc, client, controllers
+    return client, controllers
 
 
 def run(stop=None):
@@ -168,15 +219,16 @@ def run(stop=None):
     gamma = float(fans.get("gamma", 2.2))
     mode = fans.get("mode", "gradient")
     period = max(2.0, float(fans.get("period_seconds", 12)))
-    proc = client = None
+    client = None
     controllers = []
     accent = None
     shades = None
     mtime = 0.0
+    SERVER.use()
     while stop is None or not stop.is_set():
         try:
             if client is None:
-                proc, client, controllers = connect(cfg)
+                client, controllers = connect(cfg)
                 if not controllers:
                     log("no matching controllers, retrying in 30s")
                     STATUS["detail"] = "no ARGB controller found"
@@ -211,14 +263,11 @@ def run(stop=None):
             if client:
                 client.close()
             client = None
-            if proc and proc.poll() is None:
-                proc.terminate()
-            proc = None
+            SERVER.stop()
             time.sleep(5)
     if client:
         client.close()
-    if proc and proc.poll() is None:
-        proc.terminate()
+    SERVER.release()
     STATUS["present"] = False
     STATUS["detail"] = "stopped"
 
@@ -227,14 +276,14 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
     if cmd == "info":
         cfg = load_config()
-        proc, client, controllers = connect(cfg)
+        SERVER.use()
+        client, controllers = connect(cfg)
         for i in range(client.controller_count()):
             info = client.controller(i)
             print(i, info["name"], "active_mode", info["active_mode"], "leds", info["num_leds"])
             print("   modes:", [m["name"] for m in info["modes"]])
             print("   zones:", [(z["name"], z["leds_count"], z["leds_max"]) for z in info["zones"]])
         client.close()
-        if proc:
-            proc.terminate()
+        SERVER.release()
     else:
         run()

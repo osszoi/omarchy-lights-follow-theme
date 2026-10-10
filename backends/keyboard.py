@@ -93,17 +93,16 @@ def apply():
     already_up = fans.port_open(port)
     if changed and already_up:
         log("openrgb detector list changed, the running server needs a restart to see the keyboard")
-    proc = None
-    # the fans worker owns the server while the daemon runs: never race it with a second openrgb on the same port
-    if daemon_running() and cfg["fans"].get("enabled", True):
+    # the daemon owns the server while it syncs something: never race it with a second openrgb on the same port
+    if daemon_running() and fans.daemon_serves(cfg):
         if not wait_for_server(port):
             log("daemon is running but its openrgb server never came up on port", port)
             record_result("keyboard", {"ok": False, "present": True, "detail": "openrgb server not up", "at": time.time()})
             return 1
-    else:
-        proc = fans.start_server(port)
+    fans.SERVER.use()
     client = None
     try:
+        fans.SERVER.ensure(port)
         client = OpenRGBClient(port=port)
         idx, info = find(client, match)
         if idx is None:
@@ -135,15 +134,14 @@ def apply():
     finally:
         if client:
             client.close()
-        if proc and proc.poll() is None and not already_up:
-            proc.terminate()
+        fans.SERVER.release()
 
 
 def info():
     cfg = load_config()
-    fans.ensure_openrgb_config()
     port = int(cfg["fans"].get("sdk_port", 6763))
-    proc = fans.start_server(port)
+    fans.SERVER.use()
+    fans.SERVER.ensure(port)
     client = OpenRGBClient(port=port)
     idx, data = find(client, cfg["keyboard"].get("device_match", "Keychron"))
     if idx is None:
@@ -155,8 +153,7 @@ def info():
             tint = "themed" if m["flags"] & MODE_FLAG_MODE_SPECIFIC_COLOR else ""
             print("   %-28s %s" % (m["name"], tint))
     client.close()
-    if proc:
-        proc.terminate()
+    fans.SERVER.release()
 
 
 if __name__ == "__main__":

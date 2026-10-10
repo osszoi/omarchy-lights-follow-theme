@@ -8,10 +8,11 @@ Makes the physical lights on the desk follow the current [Omarchy](https://omarc
 | Secretlab MAGNUS Pro MAGRGB strip (Nanoleaf Smart Lighting Edition) | Nanoleaf local API, a `flow` effect with a palette of accent shades |
 | Govee lights (H6061 Glide Hexa, H6056 Flow Plus) | Govee LAN API, per-segment gradient of accent shades slowly rotating |
 | Keychron Q6 Max keyboard | OpenRGB (QMK/Keychron raw HID), the keyboard's own reactive effect tinted with the accent: dark at rest, keys flare as you type |
+| HyperX QuadCast S microphone | OpenRGB in Direct mode (SDK), top and bottom LEDs drift through the accent-shade gradient; the theme's flat color is saved into the mic for whenever nothing streams to it |
 
 A bar widget in the Omarchy shell lists everything it found with a toggle per device, so you can take one piece of hardware out of the rotation without touching a config file.
 
-Runs from Omarchy's `theme-set` hook, so `omarchy theme set <name>` (or the theme picker) updates everything. Fans and Govee are animated by one small user service (`omarchy-lights.service`) that re-reads the palette whenever the theme changes; the desk gets a Nanoleaf effect written once per theme change.
+Runs from Omarchy's `theme-set` hook, so `omarchy theme set <name>` (or the theme picker) updates everything. Fans, Govee and the mic are animated by one small user service (`omarchy-lights.service`) that re-reads the palette whenever the theme changes; the desk gets a Nanoleaf effect written once per theme change.
 
 ## Install
 
@@ -26,7 +27,9 @@ Requirements you have to do once, by hand:
 - If `ufw` is active the installer adds one rule (inbound udp 4002 from your LAN) so the lights' discovery replies get through.
 - The MAGRGB strip must be on the same Wi-Fi as this PC. To pair: Nanoleaf app -> MAGRGB -> device settings -> **Connect to API**, while `omarchy-lights pair-desk` is polling (30 s window). Never hold the controller's power button for that: 10 s is a factory reset.
 - The keyboard only speaks RGB over the **USB cable**. On the Keychron Link dongle or Bluetooth there is no OpenRGB detector and no udev rule, so it keeps whatever color it last got. The effect is saved into the keyboard itself (same as Keychron Launcher does), so it survives reboots, unplugging and wireless — it just stops following theme changes until the cable is back. The daemon also re-applies it whenever the keyboard shows up on USB again.
-- OpenRGB runs with a private config (`~/.config/omarchy-lights/openrgb`) where only the Cooler Master and Keychron detectors are enabled: the stock detection segfaults on exit with this GPU/monitor/mic combo, and it keeps your own OpenRGB setup untouched.
+- The mic's LEDs only hold a color while something streams to them; the moment OpenRGB stops they play whatever is saved in the mic. The daemon saves the theme's flat color there on every theme change, which **replaces the factory rainbow for good** (OpenRGB only exposes Direct mode for it, so it can't bring the rainbow back). Mute still works: the mic turns its LEDs off on tap no matter what is streaming, so every color sent to it is lifted to at least `mic.min_brightness` to never pass for "muted" on a dark theme.
+- OpenRGB only detects devices when it starts. If the mic is replugged the mic worker restarts the shared OpenRGB server, so the fans pause for a few seconds too.
+- OpenRGB runs with a private config (`~/.config/omarchy-lights/openrgb`) where only the Cooler Master, Keychron and HyperX Quadcast S detectors are enabled: the stock detection segfaults on exit with this GPU/monitor/mic combo, and it keeps your own OpenRGB setup untouched.
 
 ## Bar widget
 
@@ -83,6 +86,8 @@ The palette then flows through all of them (shades of A → blend → shades of 
   "desk":  {"enabled": true, "host": "192.168.1.37", "port": 16021, "token": "...", "effect": "flow"},
   "keyboard": {"enabled": true, "detector": "Keychron Q6 Max", "device_match": "Keychron",
                "usb_id": "3434:0860", "effect": "Solid Reactive Multinexus"},
+  "mic":   {"enabled": true, "detector": "HyperX Quadcast S", "device_match": "Quadcast",
+            "usb_id": "03f0:028c", "fps": 4, "period_seconds": 12, "min_brightness": 0.35},
   "govee": {
     "enabled": true,
     "fps": 4,
@@ -97,6 +102,7 @@ The palette then flows through all of them (shades of A → blend → shades of 
 - `fans.mode`: `gradient` (shades of the accent flowing around each fan, `period_seconds` per loop) or `brightness` (single accent color, every LED wandering between `min_brightness` and `max_brightness`, perceptual via `gamma`).
 - `desk.effect`: `flow`, `wheel`, `fade`, `highlight` or `static`.
 - `keyboard.effect`: any effect the keyboard reports that takes a color — `Solid Reactive Simple`, `Solid Reactive Multiwide`, `Solid Reactive Multinexus`, `Solid Splash`, `Solid Color`, `Breathing`, `Band Spiral`. `omarchy-lights keyboard info` lists them and marks the themeable ones. Brightness stays on the keyboard's own `Fn` keys.
-- `keyboard.detector` must be the OpenRGB detector name for your board (`Keychron Q6 Max`, `Keychron K8 Pro`, ...); it and the fans detector are the only two OpenRGB enables in the private config.
+- `keyboard.detector` must be the OpenRGB detector name for your board (`Keychron Q6 Max`, `Keychron K8 Pro`, ...); it, `mic.detector` and the fans detector are the only OpenRGB enables in the private config.
+- `mic.usb_id` is the mic's lighting controller, not its audio device (`lsusb` lists both as HyperX QuadCast S; the QuadCast S here is `03f0:028c` for lights and `03f0:0294` for audio). `mic.min_brightness` is an HSV value floor (0-1) for the mic only.
 - `govee.segments`: segment count per SKU (check the layout page in the Govee app); per device override under `devices`.
 - Govee streaming is live: ~10 s without a frame (Wi‑Fi drop) and the light shows its stored color instead. That stored color is set to the palette's `static` (the accent, or the blend of the theme colors when there are several) every time a light joins the stream and on every theme change, so a dropout shows a flat theme color rather than an old app scene. Per-panel colors can't be stored on the H6061 — the segment command is ignored by that model.

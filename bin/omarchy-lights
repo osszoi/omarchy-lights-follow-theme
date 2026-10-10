@@ -99,7 +99,7 @@ cmd_status() {
   echo "theme:   $(cat "$HOME/.local/state/omarchy/current/theme.name" 2>/dev/null) (accent $(current_accent))"
   echo "palette: $([[ -f $PALETTE ]] && python3 -c "import json,sys;print(' '.join(json.load(open(sys.argv[1]))['shades']))" "$PALETTE" || echo none)"
   echo "hook:    $([[ -f $HOME/.config/omarchy/hooks/theme-set.d/omarchy-lights ]] && echo installed || echo missing)"
-  echo "daemon:  $(systemctl --user is-active "$SERVICE" 2>/dev/null) (fans + govee animation)"
+  echo "daemon:  $(systemctl --user is-active "$SERVICE" 2>/dev/null) (fans + govee + mic animation)"
   echo "openrgb: $(command -v openrgb >/dev/null && echo installed || echo missing)"
   echo "desk:    $(python3 -c "import json,sys;c=json.load(open(sys.argv[1]))['desk'];print(c['host'] or 'unknown host', 'paired' if c['token'] else 'NOT paired')" "$CONFIG_DIR/config.json" 2>/dev/null || echo unconfigured)"
   echo "govee:   $(python3 "$ROOT/backends/govee.py" scan 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);print(', '.join(f\"{v['sku']}@{v['ip']}\" for v in d.values()) or 'none found on LAN')")"
